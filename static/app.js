@@ -2214,7 +2214,9 @@ function initializeEventListeners() {
     if (!ttsBtn) return;
     try {
       const st = loadToggleState();
-      if (st.ttsMode) {
+      // Read-aloud defaults ON (auto-play assistant replies) unless the user
+      // has explicitly turned it off. Local Kokoro TTS powers playback.
+      if (st.ttsMode !== false) {
         ttsBtn.classList.add('active');
         if (window.aiTTSManager) window.aiTTSManager.autoPlay = true;
       }

@@ -78,7 +78,13 @@ _BUILTIN_NPX_SERVERS = {
     "builtin_browser": {
         "name": "Built-in: Browser",
         "command": "npx",
-        "args": ["-y", "@playwright/mcp@latest", "--headless", "--caps", "vision"],
+        # --browser firefox: Playwright defaults to Chromium; Firefox is used
+        # here instead as the Mozilla-backed, fully open-source engine. Other
+        # accepted values are chrome, webkit and msedge. The matching browser
+        # build must exist under PLAYWRIGHT_BROWSERS_PATH, and Firefox needs
+        # X11 libraries Chromium does not — both are handled in the Dockerfile.
+        "args": ["-y", "@playwright/mcp@latest", "--headless", "--caps", "vision",
+                 "--browser", "firefox"],
     },
 }
 
@@ -193,7 +199,7 @@ def _npx_package_from_args(args):
     return None
 
 
-async def _is_npx_package_cached(npx_path, package_spec, timeout_s=5):
+async def _is_npx_package_cached(npx_path, package_spec, timeout_s=25):
     """Probe whether an npx package is already in the local cache.
 
     Runs `npx --no-install <pkg> --version`. --no-install tells npx to
@@ -201,6 +207,14 @@ async def _is_npx_package_cached(npx_path, package_spec, timeout_s=5):
     "exited 0 with non-empty stdout" as proof of a working cached copy.
     Anything else (non-zero exit, empty stdout, timeout, missing npx,
     network error) means we should skip the server.
+
+    The timeout is generous because this probe fires during startup, while the
+    app is also loading FastEmbed, reaching ChromaDB and spawning every other
+    MCP server. A cached lookup costs ~1s on an idle machine, but on a slow or
+    power-throttled host that same lookup drifted past the original 5s budget
+    and the browser server was dropped as "not installed" even though the cache
+    was fine. A cache *miss* still returns immediately, so the larger ceiling
+    costs nothing in the common failure case.
     """
     try:
         proc = await asyncio.create_subprocess_exec(

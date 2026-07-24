@@ -16,6 +16,10 @@ services:
       # land under /app/.local for the odysseus user. Persist them so a
       # container recreate does not silently remove installed serve engines.
       - ./data/local:/app/.local:z
+      # Named volumes (Linux-side storage): fast enough for the 5s npx cache
+      # probe, and preserved across `compose up -d` recreates.
+      - npm-cache:/opt/npm-cache
+      - playwright-browsers:/opt/ms-playwright
     extra_hosts:
       # Lets the container reach local services on the Docker host, including
       # Ollama at http://host.docker.internal:11434.
@@ -62,6 +66,21 @@ services:
       # Find yours with:  id -u  /  id -g
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
+      # The entrypoint drops privileges with gosu, which preserves the
+      # environment as-is — so HOME stayed at the image default (/root), a
+      # directory uid 1000 cannot read. Everything else already assumes /app is
+      # the app user's home (the entrypoint puts Cookbook's `pip install --user`
+      # output in /app/.local for exactly that reason), and npx silently fails
+      # to find its package cache without it, which disables the built-in
+      # Playwright browser MCP server.
+      - HOME=/app
+      # npx package cache + Playwright browsers, kept on named volumes (see
+      # below). They must survive a container recreate, but they cannot live on
+      # a Windows bind mount: reading the node_modules tree over one takes ~13s,
+      # and builtin_mcp probes the cache with `npx --no-install` under a 5s
+      # timeout, so the browser MCP server was skipped as "not installed".
+      - npm_config_cache=/opt/npm-cache
+      - PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
     depends_on:
       searxng:
         condition: service_healthy
@@ -140,7 +159,19 @@ services:
       - NTFY_BASE_URL=${NTFY_BASE_URL:-http://localhost:8091}
     restart: unless-stopped
 
+  # Local neural text-to-speech (Kokoro-82M) exposing an OpenAI-compatible
+  # /v1/audio/speech endpoint. CPU image — no GPU passthrough required. Odysseus
+  # reaches it over the compose network at http://kokoro:8880/v1 (configured as a
+  # TTS endpoint in Settings). Fully local/offline; no API key, no cloud.
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    ports:
+      - "${KOKORO_BIND:-127.0.0.1}:8880:8880"
+    restart: unless-stopped
+
 volumes:
   searxng-data:
   chromadb-data:
   ntfy-cache:
+  npm-cache:
+  playwright-browsers:
