@@ -12,8 +12,8 @@ A self-hosted AI workspace -- meant to be the self-hosted version of the UI expe
 
 > **Fork note** — this copy is adapted for a fully local Windows + Docker
 > deployment (Ollama, local speech-to-text and text-to-speech, Firefox-based
-> browser automation, self-hosted search). See [MODIFICATIONS.md](MODIFICATIONS.md)
-> for what differs from upstream and why.
+> browser automation, self-hosted search). What differs from upstream, and why:
+> [English](MODIFICATIONS.en.md) · [Français](MODIFICATIONS.md).
 
 ## Features
   - **Chat** -- chat with any local model or API; adding them is super simple.<br>　<sub>vLLM · llama.cpp · Ollama · OpenRouter · OpenAI · GitHub Copilot</sub>
