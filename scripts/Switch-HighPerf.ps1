@@ -1,20 +1,27 @@
 # Switch-HighPerf.ps1
-# Run this AFTER the charging port is repaired.
+# Promotes the larger chat model - but only once the GPU is confirmed to boost.
 #
-# While the port is faulty the machine sits on a survival power budget: the
-# battery neither charges nor discharges and the RTX 4090 stays pinned to
-# P-state P8 (210 MHz of 3105, ~19 W), which is roughly a 10x slowdown. Under
-# that clamp a 14B model manages ~1.7 tok/s, so Odysseus was configured around
-# small models instead.
+# A laptop GPU can sit pinned in a low-power state (P8, a few hundred MHz
+# instead of a few thousand) whenever the system is on a constrained power
+# budget: battery saver, an underpowered or faulty adapter, a vendor thermal
+# profile. Utilisation still reads ~100%, so the only reliable signal is the
+# clock under load. Inference then runs roughly an order of magnitude slower,
+# and a model that is excellent on a healthy machine becomes unusable.
 #
-# This script verifies the GPU can actually boost again, and only then promotes
-# qwen3:14b (already downloaded) to the default chat + research model.
+# Rather than assume, this script loads the GPU briefly, samples the clock, and
+# only switches the configuration if the card actually boosts. Otherwise it
+# leaves the small-model setup alone and says so.
+#
+# Paths are derived from this script's own location, so the repository can live
+# anywhere.
 
 $ErrorActionPreference = 'Stop'
 
-$Settings = 'C:\Users\Matthieu\odysseus\data\settings.json'
-$BigModel = 'qwen3:14b'
-$MinClockMHz = 1000   # P8 idle sits at 210; a healthy boost clears 1500+
+$ProjectDir  = Split-Path -Parent $PSScriptRoot
+$Settings    = Join-Path $ProjectDir 'data\settings.json'
+$BigModel    = 'qwen3:14b'   # promoted when the GPU is healthy
+$ProbeModel  = 'qwen3:4b'    # small model used to put the GPU under load
+$MinClockMHz = 1000          # a throttled card idles near 200; a healthy one clears 1500+
 
 function Write-Ok  ($m) { Write-Host "  [OK] $m" -ForegroundColor Green }
 function Write-Warn($m) { Write-Host "  [!]  $m" -ForegroundColor Yellow }
@@ -23,18 +30,20 @@ Write-Host ''
 Write-Host '  Odysseus - bascule haute performance' -ForegroundColor White
 Write-Host '  -----------------------------------' -ForegroundColor DarkGray
 
-# ── 1. Charging state ──
-$bat = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
-if ($bat) { Write-Host "  Batterie : $($bat.EstimatedChargeRemaining)%" -ForegroundColor DarkGray }
+if (-not (Test-Path $Settings)) {
+    Write-Warn "Fichier de reglages introuvable ($Settings)"
+    exit 1
+}
 
-# ── 2. Does the GPU actually boost? ──
-# Idle clocks are always low, so load the GPU briefly and sample under load.
-Write-Host '  Test de monte en frequence du GPU...' -ForegroundColor Cyan
-$job = Start-Job {
+# -- Does the GPU actually boost? --
+# Idle clocks are always low, so load the GPU first and sample under load.
+Write-Host '  Test de montee en frequence du GPU...' -ForegroundColor Cyan
+$job = Start-Job -ArgumentList $ProbeModel {
+    param($model)
     try {
+        $body = @{ model = $model; prompt = 'Compte de 1 a 50.'; stream = $false; think = $false } | ConvertTo-Json
         Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/generate' -Method Post `
-            -ContentType 'application/json' -TimeoutSec 120 `
-            -Body '{"model":"qwen3:4b","prompt":"Compte de 1 a 50.","stream":false,"think":false}'
+            -ContentType 'application/json' -TimeoutSec 120 -Body $body
     } catch {}
 }
 Start-Sleep -Seconds 10
@@ -46,11 +55,16 @@ for ($i = 0; $i -lt 6; $i++) {
 }
 Remove-Job $job -Force -ErrorAction SilentlyContinue
 
+if ($peak -eq 0) {
+    Write-Warn 'Aucune mesure GPU (nvidia-smi indisponible ?) - configuration inchangee.'
+    exit 1
+}
+
 Write-Host "  Frequence GPU max observee : $peak MHz" -ForegroundColor DarkGray
 
 if ($peak -lt $MinClockMHz) {
-    Write-Warn "Le GPU plafonne a $peak MHz — il est toujours bride."
-    Write-Host '  La reparation n a pas leve la limitation, ou la batterie est encore trop basse.' -ForegroundColor DarkGray
+    Write-Warn "Le GPU plafonne a $peak MHz - il est toujours bride."
+    Write-Host '  Verifiez l alimentation et le profil energetique du systeme.' -ForegroundColor DarkGray
     Write-Host '  Configuration inchangee (petits modeles conserves).' -ForegroundColor DarkGray
     Write-Host ''
     Write-Host '  Appuyez sur une touche pour fermer...' -ForegroundColor DarkGray
@@ -60,13 +74,13 @@ if ($peak -lt $MinClockMHz) {
 
 Write-Ok "GPU debride ($peak MHz)"
 
-# ── 3. Promote the big model ──
+# -- Promote the big model --
 $json = Get-Content $Settings -Raw | ConvertFrom-Json
 $json.default_model  = $BigModel
 $json.research_model = $BigModel
 $json | ConvertTo-Json -Depth 20 | Set-Content $Settings -Encoding utf8
 Write-Ok "Modele principal + recherche -> $BigModel"
-Write-Host '  (utilitaire/taches restent sur llama3.2 : les titres et resumes gagnent a etre instantanes)' -ForegroundColor DarkGray
+Write-Host '  (utilitaire/taches restent sur un petit modele : titres et resumes gagnent a etre instantanes)' -ForegroundColor DarkGray
 
 # Settings are re-read from disk within ~2s (TTL cache), no restart needed.
 Write-Host ''

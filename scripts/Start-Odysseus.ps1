@@ -1,26 +1,30 @@
 # Start-Odysseus.ps1
 # One-click launcher: brings up the whole Odysseus environment, in order.
 #
-#   1. Docker Desktop  — the compose services (odysseus, kokoro, searxng,
+#   1. Docker Desktop  - the compose services (odysseus, kokoro, searxng,
 #                        chromadb, ntfy) are `restart: unless-stopped`, so they
 #                        come back on their own once the engine is up.
-#   2. Ollama          — a host app, NOT registered for autostart, so it stays
-#                        down after a reboot and every model role (chat, vision)
-#                        fails until it is started. This is the step that
-#                        actually needs us.
-#   3. compose up -d   — reconciles anything the engine did not restore.
-#   4. Browser         — opened only once the app answers on its port.
+#   2. Ollama          - runs on the host rather than in Docker, and is not
+#                        guaranteed to be registered for autostart, so it can
+#                        stay down after a reboot while every model-backed
+#                        feature quietly fails. This is the step that matters.
+#   3. compose up -d   - reconciles anything the engine did not restore.
+#   4. Browser         - opened only once the app answers on its port.
 #
 # Safe to run when everything is already running: every step is a no-op then.
+#
+# Paths are derived from this script's own location, so the repository can live
+# anywhere.
 
 $ErrorActionPreference = 'Stop'
 
-$ProjectDir   = 'C:\Users\Matthieu\odysseus'
-$ComposeFile  = Join-Path $ProjectDir 'docker-compose.yml'
-$DockerDesktop= 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
-$OllamaApp    = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama app.exe'
-$AppUrl       = 'http://127.0.0.1:7000'
-$OllamaUrl    = 'http://127.0.0.1:11434/api/version'
+$ProjectDir    = Split-Path -Parent $PSScriptRoot
+$ComposeFile   = Join-Path $ProjectDir 'docker-compose.yml'
+$DockerDesktop = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
+$OllamaApp     = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama app.exe'
+$AppUrl        = 'http://127.0.0.1:7000'
+$OllamaUrl     = 'http://127.0.0.1:11434/api/version'
+$AppPort       = 7000
 
 function Write-Step($msg) { Write-Host "  $msg" -ForegroundColor Cyan }
 function Write-Ok  ($msg) { Write-Host "  [OK] $msg" -ForegroundColor Green }
@@ -55,7 +59,7 @@ Write-Host ''
 Write-Host '  ODYSSEUS - demarrage de l environnement' -ForegroundColor White
 Write-Host '  ---------------------------------------' -ForegroundColor DarkGray
 
-# ── 1. Docker Desktop ──
+# -- 1. Docker Desktop --
 Write-Step 'Docker...'
 $engineUp = $false
 try { docker info *> $null; $engineUp = ($LASTEXITCODE -eq 0) } catch { $engineUp = $false }
@@ -63,7 +67,7 @@ try { docker info *> $null; $engineUp = ($LASTEXITCODE -eq 0) } catch { $engineU
 if ($engineUp) {
     Write-Ok 'moteur Docker deja actif'
 } else {
-    if (-not (Test-Path $DockerDesktop)) { Write-Warn "Docker Desktop introuvable ($DockerDesktop)"; }
+    if (-not (Test-Path $DockerDesktop)) { Write-Warn "Docker Desktop introuvable ($DockerDesktop)" }
     else {
         Start-Process $DockerDesktop | Out-Null
         Write-Host '  demarrage de Docker Desktop (peut prendre 1-2 min)' -NoNewline -ForegroundColor DarkGray
@@ -73,7 +77,7 @@ if ($engineUp) {
     }
 }
 
-# ── 2. Ollama (le maillon qui ne repart pas seul) ──
+# -- 2. Ollama (le service hote qui ne repart pas toujours seul) --
 Write-Step 'Ollama...'
 $ollamaUp = $false
 try { Invoke-RestMethod -Uri $OllamaUrl -TimeoutSec 3 | Out-Null; $ollamaUp = $true } catch { $ollamaUp = $false }
@@ -90,7 +94,7 @@ if ($ollamaUp) {
     Write-Warn "Ollama introuvable ($OllamaApp)"
 }
 
-# ── 3. Services compose ──
+# -- 3. Services compose --
 Write-Step 'Services Odysseus (compose)...'
 # No `2>&1` here: compose writes its progress lines to stderr, and PowerShell
 # 5.1 turns a native command's stderr into ErrorRecords (NativeCommandError),
@@ -100,10 +104,10 @@ docker compose -f $ComposeFile --project-directory $ProjectDir up -d | Out-Null
 if ($LASTEXITCODE -eq 0) { Write-Ok 'conteneurs demarres' }
 else { Write-Warn "compose up a renvoye le code $LASTEXITCODE" }
 
-# ── 4. Attendre l app, puis ouvrir le navigateur ──
+# -- 4. Attendre l app, puis ouvrir le navigateur --
 Write-Step 'Attente de l application...'
 Write-Host '  ' -NoNewline
-if (Wait-For { Test-Port '127.0.0.1' 7000 } 120 'Odysseus') {
+if (Wait-For { Test-Port '127.0.0.1' $AppPort } 120 'Odysseus') {
     Write-Host ''
     Write-Ok "application prete sur $AppUrl"
     Start-Process $AppUrl
