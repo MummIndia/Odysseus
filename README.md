@@ -10,6 +10,11 @@
 
 A self-hosted AI workspace -- meant to be the self-hosted version of the UI experience you get from ChatGPT and Claude. But with more jank and fun. Running on your own hardware, with your own data -- local-first, privacy-first, and no trojan.
 
+> **Fork note** — this copy is adapted for a fully local Windows + Docker
+> deployment (Ollama, local speech-to-text and text-to-speech, Firefox-based
+> browser automation, self-hosted search). See [MODIFICATIONS.md](MODIFICATIONS.md)
+> for what differs from upstream and why.
+
 ## Features
   - **Chat** -- chat with any local model or API; adding them is super simple.<br>　<sub>vLLM · llama.cpp · Ollama · OpenRouter · OpenAI · GitHub Copilot</sub>
   - **Agent** -- hand it tools and let it run the whole task itself.<br>　<sub>built on [opencode](https://github.com/anomalyco/opencode) · MCP · web · files · shell · skills · memory</sub>
