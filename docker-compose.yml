@@ -51,6 +51,11 @@ services:
       - ODYSSEUS_INPROCESS_POLLERS=${ODYSSEUS_INPROCESS_POLLERS:-1}
       - ODYSSEUS_INPROCESS_TASKS=${ODYSSEUS_INPROCESS_TASKS:-1}
       - ODYSSEUS_SCRIPT_HOST=${ODYSSEUS_SCRIPT_HOST:-localhost}
+      # Ceiling for non-streaming LLM calls. The 30s default targets hosted
+      # APIs; a local model on throttled hardware regularly exceeds it, and each
+      # timeout burns the full budget before the retry succeeds. It is a
+      # ceiling, not a delay, so a high value costs nothing once the box is fast.
+      - ODYSSEUS_LLM_TIMEOUT=${ODYSSEUS_LLM_TIMEOUT:-180}
       - DATA_BRAVE_API_KEY=${DATA_BRAVE_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_PSE_CX=${GOOGLE_PSE_CX:-}

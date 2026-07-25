@@ -951,7 +951,16 @@ def setup_email_routes():
 
             return {"emails": emails, "total": total, "folder": folder, "offset": offset}
         except Exception as e:
-            logger.error(f"Failed to list emails: {e}")
+            # No mailbox configured is not a failure. The UI polls this endpoint
+            # on a timer, so an unconfigured install wrote the same error line
+            # every minute and buried the problems that actually mattered.
+            # Reserve the error level for an account that exists and misbehaves.
+            try:
+                from routes.email_helpers import _list_email_accounts
+                _configured = bool(_list_email_accounts())
+            except Exception:
+                _configured = True
+            (logger.error if _configured else logger.debug)(f"Failed to list emails: {e}")
             detail = str(e).strip()
             return {"emails": [], "total": 0, "error": f"Mail operation failed: {detail[:180]}" if detail else "Mail operation failed"}
         finally:

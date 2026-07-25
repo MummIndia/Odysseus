@@ -86,6 +86,8 @@ dev-docs/
 docs/windows-port/
 
 # Local config
+# Drafts of upstream issue reports — working notes, not part of the project.
+CONTRIBUTIONS-AMONT.md
 compound.config.json
 *.error.log
 _scratch/

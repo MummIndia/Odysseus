@@ -1,6 +1,7 @@
 # src/llm_core.py
 import httpx
 import asyncio
+import os
 import time
 import json
 import logging
@@ -16,7 +17,12 @@ logger = logging.getLogger(__name__)
 
 class LLMConfig:
     """Configuration constants for LLM operations."""
-    DEFAULT_TIMEOUT = 30
+    # Ceiling for non-streaming calls, not a delay — raising it costs nothing
+    # when the model is fast. 30s suits a hosted API but is tight for a local
+    # model on modest hardware, where a summary or a tool-result round can take
+    # longer and every timeout burns the full budget before retrying.
+    # Override with ODYSSEUS_LLM_TIMEOUT (seconds).
+    DEFAULT_TIMEOUT = int(os.environ.get("ODYSSEUS_LLM_TIMEOUT", "30"))
     DEFAULT_TEMPERATURE = 1.0
     DEFAULT_MAX_TOKENS = 0
     MAX_RETRIES = 3

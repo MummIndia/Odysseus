@@ -659,10 +659,14 @@ def _get_email_config(account_id: str | None = None, owner: str = "") -> dict:
         "imap_starttls": settings.get("imap_starttls", True),
         "from_address": settings.get("email_from", os.environ.get("EMAIL_FROM", "")),
     }
+    # Debug, not warning: this runs on every poll of the mail endpoints, so on an
+    # install with no mailbox it repeats forever without telling the operator
+    # anything new. Callers surface the missing configuration in the UI, which is
+    # where someone can actually act on it.
     if not (cfg["smtp_host"] and cfg["smtp_user"] and cfg["smtp_password"]):
-        logger.warning("SMTP not configured — add an Email Account in Settings or set env vars")
+        logger.debug("SMTP not configured — add an Email Account in Settings or set env vars")
     if not (cfg["imap_host"] and cfg["imap_user"] and cfg["imap_password"]):
-        logger.warning("IMAP not configured — add an Email Account in Settings or set env vars")
+        logger.debug("IMAP not configured — add an Email Account in Settings or set env vars")
     return cfg
 
 
