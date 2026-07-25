@@ -384,8 +384,12 @@ def _endpoint_refresh_timeout(ep: Any, category: str) -> float:
     except Exception:
         val = 0
     if val > 0:
-        return float(max(1, min(30, val)))
-    return 2.5 if category == "local" else 2.0
+        return float(max(1, min(60, val)))
+    # Local servers (llama.cpp, Ollama, vLLM) can block while warming or
+    # loading a model. A 2.5s ceiling makes a perfectly healthy endpoint
+    # flicker offline before /v1/models is ready — and on a machine whose GPU
+    # is throttled, that is the normal case rather than the exception.
+    return 10.0 if category == "local" else 2.0
 
 
 def _manual_refresh_timeout(ep: Any, category: str, requested: Any = None) -> float:
@@ -452,7 +456,7 @@ def _explicit_model_list_timeout(base_url: str, endpoint_kind: str = "auto", req
     category = _classify_endpoint(base_url, kind)
     if kind in ("api", "proxy") or category == "api":
         return 30.0
-    return 3.0 if _is_ollama_base(base_url) else 2.0
+    return 15.0 if category == "local" else (3.0 if _is_ollama_base(base_url) else 2.0)
 
 
 def _cached_model_ids(ep: Any) -> List[str]:
