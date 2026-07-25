@@ -42,9 +42,25 @@ services:
       - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
       - SECURE_COOKIES=${SECURE_COOKIES:-false}
-      - EMBEDDING_URL=${EMBEDDING_URL:-}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-}
+      # Embeddings drive tool selection, memory and RAG retrieval. The bundled
+      # FastEmbed fallback (all-MiniLM-L6-v2) is English-only: on a French query
+      # it scored the right tool at 0.23 against 0.78 for the same query in
+      # English, which is close enough to noise that the agent was handed an
+      # irrelevant tool set. bge-m3 is multilingual and runs locally in Ollama.
+      #
+      # Note both lines were previously set to an empty string rather than left
+      # unset. An empty value is not the same as absent — os.getenv returns ""
+      # instead of the default, so the HTTP lane was built with an empty URL and
+      # silently fell back to FastEmbed every time.
+      - EMBEDDING_URL=${EMBEDDING_URL:-http://host.docker.internal:11434/v1/embeddings}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-bge-m3}
       - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
+      # Read budget for one embedding call. The startup pass sends the whole
+      # builtin tool catalogue in a single batch, which overruns the 10s default
+      # on a slow GPU — the lane is then dropped as timed out and its collection
+      # stays empty. Only the read budget is raised; a missing endpoint still
+      # fast-fails on connect.
+      - EMBEDDING_TIMEOUT=${EMBEDDING_TIMEOUT:-120}
       - FASTEMBED_MODEL=${FASTEMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       - FASTEMBED_CACHE_PATH=${FASTEMBED_CACHE_PATH:-}
       - CLEANUP_INTERVAL_HOURS=${CLEANUP_INTERVAL_HOURS:-24}
