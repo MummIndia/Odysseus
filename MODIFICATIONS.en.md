@@ -80,6 +80,26 @@ A Docker volume (stored Linux-side) satisfies both constraints.
 Chromium; Firefox is preferred here as the fully open-source, Mozilla-backed
 engine. Other accepted values are `chrome`, `webkit` and `msedge`.
 
+**Environment passed to MCP servers.** `_connect_stdio` built
+`env={**os.environ, **env} if env else None`. `None` does not mean "inherit" —
+the MCP SDK substitutes a minimal default environment. The Python servers pass
+`PYTHONPATH`, so they inherited everything; the NPX server passed nothing and
+lost `PLAYWRIGHT_BROWSERS_PATH`. It then looked for browsers in the default
+cache and reported `Browser "firefox" is not installed`, with the browser sitting
+installed one directory away.
+
+**Reconnecting built-in MCP servers.** A session can vanish without the process
+dying (a stdio teardown racing across asyncio tasks). The existing recovery only
+ran when a call raised, which presupposes a session, so a missing session was
+terminal. It is now attempted in that case too, and covers the NPX servers — the
+browser was excluded by a membership test against the Python-server dict alone.
+
+> ⚠️ Browsers must be installed with the Playwright version bundled inside
+> `@playwright/mcp`, not with the standalone `playwright` package: the build
+> numbers differ and the server rejects the one it did not expect.
+> `npx @playwright/mcp@latest install-browser firefox`, as uid 1000. They live in
+> the `playwright-browsers` volume, so outside the image.
+
 **npx cache probe timeout raised from 5s to 25s.** The probe fires during
 startup, while the app is also loading FastEmbed, reaching ChromaDB and
 spawning the other MCP servers. A hit in an already-populated cache costs ~1s

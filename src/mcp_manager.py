@@ -183,10 +183,22 @@ class McpManager:
             from mcp.client.stdio import stdio_client
             from contextlib import AsyncExitStack
 
+            # Always start from the parent environment. Passing None here does
+            # not mean "inherit" — the MCP SDK substitutes a deliberately
+            # minimal default environment, so a server launched with no extra
+            # variables silently loses every setting the operator configured.
+            #
+            # That asymmetry bit the built-in browser: the Python servers pass
+            # PYTHONPATH, so they took the merge branch and inherited
+            # everything, while the NPX one passed nothing and lost
+            # PLAYWRIGHT_BROWSERS_PATH. It then looked for browsers under the
+            # default cache instead of the configured one and reported
+            # 'Browser "firefox" is not installed' — with the browser sitting
+            # installed a directory away.
             server_params = StdioServerParameters(
                 command=command,
                 args=args,
-                env={**os.environ, **env} if env else None,
+                env={**os.environ, **(env or {})},
             )
 
             stack = AsyncExitStack()
@@ -442,6 +454,17 @@ class McpManager:
         tool_name = parts[2]
 
         session = self._sessions.get(server_id)
+        if not session and self.is_builtin(server_id):
+            # A session can vanish without the subprocess dying — a stdio
+            # teardown that raced across asyncio tasks leaves the server
+            # running while we lose our handle on it. The recovery below only
+            # ran when a call *raised*, which needs a session to begin with, so
+            # this state was terminal: the tools stayed advertised, every call
+            # returned "not connected", and the model concluded the capability
+            # did not exist and tried to install it. Reconnect first, fail after.
+            logger.warning(f"No session for builtin {server_id}; attempting reconnect")
+            if await self._reconnect_builtin(server_id):
+                session = self._sessions.get(server_id)
         if not session:
             return {"error": f"MCP server not connected: {server_id}", "exit_code": 1}
 
@@ -500,9 +523,43 @@ class McpManager:
         return result_dict
 
     async def _reconnect_builtin(self, server_id: str) -> bool:
-        """Tear down and reconnect a crashed builtin MCP server."""
+        """Tear down and reconnect a crashed builtin MCP server.
+
+        Covers both builtin families. The NPX-backed ones (the browser) were
+        previously excluded by the `_BUILTIN_SERVERS` membership test below, so
+        the only builtin server whose subprocess is not ours to supervise was
+        also the only one that could never be revived.
+        """
         import sys
-        from src.builtin_mcp import _BUILTIN_SERVERS
+        from src.builtin_mcp import _BUILTIN_SERVERS, _BUILTIN_NPX_SERVERS, _find_npx
+
+        if server_id in _BUILTIN_NPX_SERVERS:
+            cfg = _BUILTIN_NPX_SERVERS[server_id]
+            # _find_npx rather than shutil.which: on Windows the shim is
+            # npx.cmd, which only resolves through PATHEXT.
+            npx_path = _find_npx()
+            if not npx_path:
+                logger.error(
+                    f"Cannot reconnect {cfg['name']}: {cfg['command']} not found"
+                )
+                return False
+            await self.disconnect_server(server_id)
+            try:
+                ok = await self.connect_server(
+                    server_id=server_id,
+                    name=cfg["name"],
+                    transport="stdio",
+                    command=npx_path,
+                    args=cfg["args"],
+                )
+                if ok:
+                    logger.info(f"Reconnected builtin MCP server: {cfg['name']}")
+                else:
+                    logger.warning(f"Reconnect returned no session: {cfg['name']}")
+                return ok
+            except Exception as e:
+                logger.error(f"Failed to reconnect {cfg['name']}: {e}")
+                return False
 
         if server_id not in _BUILTIN_SERVERS:
             return False

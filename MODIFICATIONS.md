@@ -86,6 +86,27 @@ Chromium par défaut ; Firefox lui est préféré ici comme moteur pleinement op
 source porté par Mozilla. Les autres valeurs acceptées sont `chrome`, `webkit`
 et `msedge`.
 
+**Environnement transmis aux serveurs MCP.** `_connect_stdio` construisait
+`env={**os.environ, **env} if env else None`. Or `None` ne signifie pas
+« hérite » : le SDK MCP y substitue un environnement minimal. Les serveurs
+Python passaient `PYTHONPATH`, donc héritaient de tout ; le serveur npx ne
+passait rien et perdait `PLAYWRIGHT_BROWSERS_PATH`. Il cherchait alors les
+navigateurs dans le cache par défaut et signalait `Browser "firefox" is not
+installed` — avec le navigateur installé un dossier plus loin.
+
+**Reconnexion des serveurs MCP intégrés.** Une session peut disparaître sans
+que le processus meure (fermeture stdio à cheval sur deux tâches asyncio). La
+reconnexion existante ne se déclenchait qu'en cas d'exception, ce qui suppose
+une session ; l'absence de session était donc définitive. Elle est désormais
+tentée aussi dans ce cas, et couvre les serveurs npx — le navigateur en était
+exclu par un test d'appartenance au seul dictionnaire des serveurs Python.
+
+> ⚠️ Les navigateurs doivent être installés avec la version de Playwright
+> qu'embarque `@playwright/mcp`, pas avec le paquet `playwright` autonome :
+> les numéros de build diffèrent et le serveur refuse celui qu'il n'attend pas.
+> `npx @playwright/mcp@latest install-browser firefox`, en uid 1000. Ils vivent
+> dans le volume `playwright-browsers`, donc hors de l'image.
+
 **Délai de la sonde de cache npx porté de 5 s à 25 s.** Cette sonde se déclenche
 pendant le démarrage, alors que l'application charge aussi FastEmbed, contacte
 ChromaDB et lance les autres serveurs MCP. Une recherche dans un cache déjà
