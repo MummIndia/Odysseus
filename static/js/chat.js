@@ -1040,8 +1040,17 @@ import { createStreamRenderer } from './streamingRenderer.js';
           if (m) errText = m[1].replace(/\\"/g, '"');
           else if (errBody.length < 200) errText = errBody;
         } catch {}
-        // Auto-switch to chat mode for tool-related errors
-        if (errText.includes('tool') || errText.includes('auto')) {
+        // Auto-switch to chat mode when the model genuinely cannot do tools.
+        //
+        // This used to fire on any error merely CONTAINING "tool" or "auto",
+        // which caught unrelated failures — a tool timing out, an MCP server
+        // dropping, anything mentioning "automatic" — and did real damage:
+        // the true error was overwritten by a wrong explanation, and the mode
+        // was persisted, so every later message in that conversation also ran
+        // without tools. It presented as "agent mode works in a new chat but
+        // not this one". Match the provider's actual wording instead (Ollama:
+        // "<model> does not support tools"), and keep the original error.
+        if (/does\s*n[o']?t\s+support\s+tools?|tools?\s+(?:are\s+)?not\s+supported/i.test(errText)) {
           errText = 'This model doesn\'t support agent tools — switched to Chat mode. Try again.';
           const _ab = document.getElementById('mode-agent-btn');
           const _cb = document.getElementById('mode-chat-btn');
