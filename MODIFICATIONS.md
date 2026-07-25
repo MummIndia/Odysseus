@@ -123,6 +123,25 @@ Ollama.
 
 Les modèles eux-mêmes se récupèrent avec `ollama pull`.
 
+### Réglages qui ont fait la différence
+
+Sur une machine modeste, ces quatre points ont plus d'effet que le choix du
+modèle lui-même :
+
+| Réglage | Valeur | Pourquoi |
+|---|---|---|
+| `disabled_tools` | ne garder que 13 outils | Un petit modèle choisit mal parmi 29 options : il tournait en boucle sur `api_call`/`app_api`. Conserver de quoi coder et agir (`bash`, `python`, `ls`, `glob`, `grep`, `read_file`, `write_file`, `edit_file`, `web_search`, `web_fetch`, `manage_memory`, `ask_user`, `update_plan`) et écarter le reste. |
+| Un seul modèle par rôle | chat = utilitaire = tâches | Un modèle distinct par rôle en maintient plusieurs en VRAM simultanément. |
+| `OLLAMA_CONTEXT_LENGTH` | 8192 | Le prompt système compact plus les schémas d'outils pèsent ~4 200 tokens : sous la valeur par défaut de 4096, Ollama tronque et le modèle affirme ne pas avoir les outils qu'il vient de recevoir. Le dimensionner sur le besoin mesuré — le surplus se paie intégralement en mémoire. |
+| `OLLAMA_KEEP_ALIVE` | `-1` | Évite de recharger plusieurs Go après cinq minutes d'inactivité. À ne combiner avec un contexte large qu'en surveillant la VRAM. |
+
+⚠️ Sous Windows, redémarrer Ollama demande de tuer **`llama-server`** en plus
+d'`ollama` : les modèles sont tenus par ces processus enfants, et un filtre
+`ollama*` les laisse orphelins avec leur allocation. Chaque redémarrage
+incomplet fuit alors la valeur d'un modèle entier en VRAM, jusqu'à ce que les
+générations soient coupées en cours (`peer closed connection`, erreur 502).
+Comparer `ollama ps` et `nvidia-smi` révèle l'écart.
+
 ---
 
 ## Suivre les mises à jour du projet d'origine

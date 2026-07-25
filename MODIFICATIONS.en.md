@@ -115,6 +115,24 @@ STT/TTS providers, and the Ollama endpoint.
 
 The models themselves come from `ollama pull`.
 
+### The settings that actually mattered
+
+On modest hardware these four did more than the choice of model:
+
+| Setting | Value | Why |
+|---|---|---|
+| `disabled_tools` | keep 13 tools | A small model picks badly among 29 options — it looped on `api_call`/`app_api`. Keep what it needs to code and act (`bash`, `python`, `ls`, `glob`, `grep`, `read_file`, `write_file`, `edit_file`, `web_search`, `web_fetch`, `manage_memory`, `ask_user`, `update_plan`) and drop the rest. |
+| One model across roles | chat = utility = tasks | A distinct model per role keeps several resident in VRAM at once. |
+| `OLLAMA_CONTEXT_LENGTH` | 8192 | The compact system prompt plus the tool schemas come to ~4,200 tokens: under the 4096 default Ollama truncates, and the model then claims it does not have the tools it was just handed. Size it on the measured need — the surplus is paid for in memory. |
+| `OLLAMA_KEEP_ALIVE` | `-1` | Avoids reloading several GB after five idle minutes. Only combine with a large context while watching VRAM. |
+
+⚠️ On Windows, restarting Ollama means killing **`llama-server`** as well as
+`ollama`: the models are held by those child processes, and an `ollama*` filter
+leaves them orphaned with their allocation. Each incomplete restart then leaks a
+full model's worth of VRAM until generations get cut mid-stream (`peer closed
+connection`, surfacing as a 502). Comparing `ollama ps` against `nvidia-smi`
+exposes the gap.
+
 ---
 
 ## Tracking upstream
