@@ -854,6 +854,16 @@ async def _direct_fallback(
                     # results match the Python fallback's skip set.
                     for _d in _CODENAV_SKIP_DIRS:
                         cmd += ["--glob", f"!**/{_d}/**"]
+                    # Keep secrets out of grep results. read_file refuses these
+                    # paths via _is_sensitive_path, but grep never consulted it:
+                    # a search for a token happily printed the matching line
+                    # out of id_rsa or .env. --iglob (not --glob) because on a
+                    # case-insensitive filesystem ID_RSA is the same file as
+                    # id_rsa, and a case-sensitive exclusion would miss it.
+                    for _pat in _SENSITIVE_FILE_PATTERNS:
+                        cmd += ["--iglob", f"!*{_pat}*"]
+                    for _base in _SENSITIVE_BASENAMES:
+                        cmd += ["--iglob", f"!**/{_base}/**", "--iglob", f"!{_base}"]
                     cmd += ["--regexp", pattern, root]
                     try:
                         import subprocess
@@ -876,7 +886,11 @@ async def _direct_fallback(
                 else:
                     file_iter = []
                     for dp, dns, fns in os.walk(root):
-                        dns[:] = [d for d in dns if d not in _CODENAV_SKIP_DIRS]
+                        dns[:] = [
+                            d for d in dns
+                            if d not in _CODENAV_SKIP_DIRS
+                            and d not in _SENSITIVE_BASENAMES
+                        ]
                         for fn in fns:
                             if glob_pat and not fnmatch.fnmatch(fn, glob_pat):
                                 continue
@@ -898,6 +912,20 @@ async def _direct_fallback(
             lines, err = await asyncio.to_thread(_grep)
             if err:
                 return {"error": err, "exit_code": 1}
+            # Final gate on the emitted paths, so neither backend can leak a
+            # sensitive file through a gap in its own exclusions (an unusual
+            # basename, a symlink, a glob that does not match the way rg reads
+            # it). Same predicate read_file uses. Lines are "path:lineno:text";
+            # take everything before the first ":<digits>:".
+            if lines:
+                _hit_re = re.compile(r"^(.*?):\d+:")
+                _safe = []
+                for _ln in lines:
+                    _m = _hit_re.match(_ln)
+                    if _m and _is_sensitive_path(os.path.realpath(_m.group(1))):
+                        continue
+                    _safe.append(_ln)
+                lines = _safe
             if not lines:
                 return {"output": f"No matches for {pattern!r} under {root}", "exit_code": 0}
             out = "\n".join(ln[:_CODENAV_MAX_LINE] for ln in lines)
