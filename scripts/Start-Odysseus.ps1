@@ -85,6 +85,22 @@ try { Invoke-RestMethod -Uri $OllamaUrl -TimeoutSec 3 | Out-Null; $ollamaUp = $t
 if ($ollamaUp) {
     Write-Ok 'Ollama deja actif'
 } elseif (Test-Path $OllamaApp) {
+    # Ollama can be "running" with its API dead: the tray app and its helper
+    # processes stay alive while nothing listens on 11434. Observed on
+    # 2026-07-25, with a model still resident in VRAM from before the server
+    # died. Start-Process on an already-running tray app is a no-op, so the
+    # script reported success while every model-backed feature stayed broken.
+    #
+    # Clear out the stale processes first. llama-server is matched explicitly:
+    # it is a CHILD process whose name does not start with "ollama", so an
+    # "ollama*" filter leaves it orphaned holding a full model's worth of VRAM.
+    $stale = Get-Process -ErrorAction SilentlyContinue |
+             Where-Object { $_.ProcessName -like 'ollama*' -or $_.ProcessName -like '*llama-server*' }
+    if ($stale) {
+        Write-Warn "Ollama ne repond pas mais $($stale.Count) processus tournent - redemarrage force"
+        $stale | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 3
+    }
     Start-Process $OllamaApp | Out-Null
     Write-Host '  demarrage d Ollama' -NoNewline -ForegroundColor DarkGray
     $null = Wait-For { Invoke-RestMethod -Uri $OllamaUrl -TimeoutSec 3 | Out-Null; $true } 90 'Ollama'

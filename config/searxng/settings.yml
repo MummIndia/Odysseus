@@ -7,3 +7,36 @@ search:
   formats:
     - html
     - json
+
+# Engine selection.
+#
+# SearXNG queries its general engines in parallel and merges what comes back.
+# A grouped query is therefore only as good as its worst engine: measured on
+# 2026-07-25 from this machine, the default set returned *zero* results for
+# "fonciere cevennes" because brave answered "too many requests" while
+# duckduckgo and startpage both served a CAPTCHA.
+#
+# Queried one at a time, the picture was clear:
+#
+#   bing        10 results      google      dead (no response)
+#   duckduckgo  10 results      mojeek      dead (no response)
+#   qwant       dead            startpage   CAPTCHA
+#   brave       rate-limited    wikipedia   0 (no matching article)
+#
+# So the ones below are switched off, leaving bing + duckduckgo (plus the
+# wiki engines, which cost nothing). That pair returned 11-20 results on
+# three consecutive runs with the target site ranked first.
+#
+# These are search engines behind a residential IP, not fixed infrastructure —
+# recheck if results thin out, and re-enable anything that recovers.
+engines:
+  - name: brave
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: qwant
+    disabled: true
+  - name: google
+    disabled: true
+  - name: mojeek
+    disabled: true
