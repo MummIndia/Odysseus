@@ -9,6 +9,7 @@ The LLM decides when to use tools by writing fenced code blocks.
 import asyncio
 import collections
 import json
+import os
 import re
 import time
 import logging
@@ -492,7 +493,18 @@ _ADMIN_SCHEMA_NAMES = frozenset([
     "create_session", "list_sessions", "send_to_session", "pipeline",
     "ask_teacher", "list_models", "search_chats",
 ])
-_TOOL_SELECTION_TIMEOUT_SECONDS = 1.5
+# Budget for the semantic tool selection, kept short because it sits on the
+# critical path of every round. On a timeout the loop falls back to
+# ALWAYS_AVAILABLE, which holds only function tools — so a slow embedding
+# backend does not merely degrade ranking, it removes every MCP server's tools
+# (the built-in browser among them) from what the model is offered. The model
+# then correctly reports it cannot browse, and the cause looks like a missing
+# feature rather than an expired timer.
+# Raise it when embeddings are served by a local model on modest hardware.
+# Override with ODYSSEUS_TOOL_SELECTION_TIMEOUT (seconds).
+_TOOL_SELECTION_TIMEOUT_SECONDS = float(
+    os.environ.get("ODYSSEUS_TOOL_SELECTION_TIMEOUT", "1.5")
+)
 
 
 def _is_ollama_openai_compat_url(endpoint_url: str) -> bool:

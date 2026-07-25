@@ -61,6 +61,12 @@ services:
       # stays empty. Only the read budget is raised; a missing endpoint still
       # fast-fails on connect.
       - EMBEDDING_TIMEOUT=${EMBEDDING_TIMEOUT:-120}
+      # Budget for the semantic tool selection that runs each round. On a
+      # timeout the loop keeps only ALWAYS_AVAILABLE, which excludes every MCP
+      # server — so the built-in browser disappears from what the model is
+      # offered and it reports, correctly, that it cannot browse. A local
+      # embedding model on a throttled GPU needs more than the 1.5s default.
+      - ODYSSEUS_TOOL_SELECTION_TIMEOUT=${ODYSSEUS_TOOL_SELECTION_TIMEOUT:-15}
       - FASTEMBED_MODEL=${FASTEMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       - FASTEMBED_CACHE_PATH=${FASTEMBED_CACHE_PATH:-}
       - CLEANUP_INTERVAL_HOURS=${CLEANUP_INTERVAL_HOURS:-24}
