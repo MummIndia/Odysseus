@@ -79,6 +79,85 @@ ne peuvent vivre :
 
 Un volume Docker (stocké côté Linux) satisfait les deux contraintes.
 
+### `src/tool_index.py`
+
+**Les outils navigateur inutilisables monopolisaient la sélection.** La
+sélection d'outils est un top-8 sémantique, et `@playwright/mcp` expose à lui
+seul 30 outils. Mesuré sur trois requêtes de navigation typiques, l'agent
+recevait `browser_drop`, `browser_handle_dialog`, `browser_close`,
+`browser_console_messages` et toute la famille souris-XY — mais
+**`browser_navigate` était absent 2 fois sur 3**. Sur « clique sur le bouton
+de connexion », 6 créneaux sur 8 partaient dans les primitives de souris.
+
+Sans l'outil qui ouvre une page, tous les autres sont morts. Le modèle
+répondait donc, exactement, qu'il ne pouvait pas aller sur internet — et cette
+réponse était juste.
+
+Deux garde-fous :
+
+- `MCP_INDEX_DENIED` — 18 outils écartés de l'index (primitives de pointage,
+  aides au débogage, plomberie de session, et `browser_run_code_unsafe` qui
+  exécute du JavaScript arbitraire). Ils restent connectés et appelables, ils
+  ne concourent simplement plus pour un créneau.
+- `MCP_COMPANIONS` — si un outil navigateur est retenu, `browser_navigate` et
+  `browser_snapshot` sont ajoutés d'office. Le préfixe est repris du résultat
+  lui-même, donc la règle tient quel que soit l'identifiant du serveur.
+
+Après correction, sur les mêmes trois requêtes : `browser_navigate` présent
+3 fois sur 3, aucun outil écarté ne passe, et les créneaux ne contiennent plus
+que des outils utiles (`navigate`, `snapshot`, `find`, `click`, `type`,
+`press_key`, `select_option`). L'application indexe 12 outils MCP au lieu de 30.
+
+### `src/agent_loop.py`
+
+**Naviguer n'est pas lire.** `browser_navigate` renvoie le titre de la page et
+une *référence* de snapshot, jamais le texte. Mesuré : à qui demande d'ouvrir
+une URL et de la résumer, l'agent appelait `browser_navigate`, constatait
+`exit_code=0`, répondait « la page s'est chargée avec succès » et s'arrêtait —
+sans avoir rien lu. Une consigne le précise désormais : navigate n'est jamais
+la dernière étape, il faut enchaîner sur `browser_snapshot` (ou `browser_find`),
+et `web_fetch` suffit en un seul appel quand il s'agit seulement de lire.
+
+La consigne interdit aussi le paramètre `filename` de `browser_snapshot`, dont
+le schéma dit : « Save snapshot to markdown file *instead of returning it in the
+response* ». Le modèle en inventait un et recevait alors un chemin de fichier au
+lieu du contenu — 175 caractères de référence contre 1634 de contenu réel une
+fois le paramètre omis.
+
+Cette consigne n'est injectée que si des outils navigateur figurent dans la
+sélection du tour — elle ne coûte rien aux autres requêtes.
+
+### `static/js/chat.js`
+
+**Une erreur contenant « tool » suffisait à désactiver le mode agent.** Le test
+portait sur `errText.includes('tool') || errText.includes('auto')`, donc
+n'importe quel échec sans rapport — un outil qui expire, un serveur MCP qui
+tombe, un message mentionnant « automatic » — déclenchait trois effets :
+le message d'erreur réel était remplacé par « This model doesn't support agent
+tools », l'interface repassait en mode Chat, et ce choix était **écrit dans
+`localStorage`**. Les messages suivants de la conversation partaient donc sans
+outils. Cela se présentait comme « le mode agent marche dans une conversation
+neuve mais plus dans celle-ci ».
+
+Le test porte désormais sur la formulation réellement émise par le fournisseur
+(Ollama : `<modèle> does not support tools`), et le message d'origine est
+conservé.
+
+### `config/searxng/settings.yml`
+
+**Le jeu de moteurs par défaut ne renvoyait rien.** SearXNG interroge ses
+moteurs en parallèle et fusionne : une requête groupée ne vaut donc que ce que
+vaut son plus mauvais moteur. Mesuré depuis cette machine, une recherche
+courante renvoyait **zéro résultat**, brave répondant « too many requests »
+pendant que duckduckgo et startpage servaient un CAPTCHA.
+
+Interrogés un par un : bing et duckduckgo renvoient 10 résultats chacun ;
+google, mojeek, qwant, startpage et brave sont morts ou bloqués. Ces cinq-là
+sont désactivés. La paire restante renvoie 11 à 20 résultats de façon stable.
+
+Ce sont des moteurs derrière une IP résidentielle, pas une infrastructure
+figée : à revérifier si les résultats s'appauvrissent.
+
 ### `src/builtin_mcp.py`
 
 **Firefox à la place de Chromium** (`--browser firefox`). Playwright utilise
@@ -155,6 +234,21 @@ modèle lui-même :
 | Un seul modèle par rôle | chat = utilitaire = tâches | Un modèle distinct par rôle en maintient plusieurs en VRAM simultanément. |
 | `OLLAMA_CONTEXT_LENGTH` | 8192 | Le prompt système compact plus les schémas d'outils pèsent ~4 200 tokens : sous la valeur par défaut de 4096, Ollama tronque et le modèle affirme ne pas avoir les outils qu'il vient de recevoir. Le dimensionner sur le besoin mesuré — le surplus se paie intégralement en mémoire. |
 | `OLLAMA_KEEP_ALIVE` | `-1` | Évite de recharger plusieurs Go après cinq minutes d'inactivité. À ne combiner avec un contexte large qu'en surveillant la VRAM. |
+
+### Le piège de l'interrupteur « web »
+
+Dans le champ de saisie, l'interrupteur web ne fait pas qu'autoriser la
+recherche : en mode agent, `allow_web_search` absent retire **`web_search` et
+`web_fetch`** (`routes/chat_routes.py`). Interrupteur éteint, l'agent n'a donc
+aucun moyen de lire une URL, y compris une URL collée explicitement dans le
+message — et il le dit, ce qui se lit à tort comme un refus ou une
+hallucination.
+
+C'est le comportement voulu : cet interrupteur est le consentement explicite à
+sortir sur le réseau, et le garder éteint par défaut est le bon réglage pour
+une installation locale. Il faut simplement savoir que **« ouvre cette page »
+exige de l'activer d'abord**. Même logique pour l'interrupteur bash, qui seul
+donne `bash`.
 
 ⚠️ Sous Windows, redémarrer Ollama demande de tuer **`llama-server`** en plus
 d'`ollama` : les modèles sont tenus par ces processus enfants, et un filtre

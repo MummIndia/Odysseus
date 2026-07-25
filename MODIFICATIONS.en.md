@@ -74,6 +74,82 @@ live neither:
 
 A Docker volume (stored Linux-side) satisfies both constraints.
 
+### `src/tool_index.py`
+
+**Unusable browser tools were crowding out the usable ones.** Tool selection
+is a semantic top-8, and `@playwright/mcp` alone exposes 30 tools. Measured
+across three typical browsing requests, the agent was handed `browser_drop`,
+`browser_handle_dialog`, `browser_close`, `browser_console_messages` and the
+whole xy-mouse family — while **`browser_navigate` was missing in 2 cases out
+of 3**. On "click the login button", 6 of the 8 slots went to mouse
+primitives.
+
+Without the tool that opens a page, every other one is dead weight. So the
+model reported, accurately, that it could not reach the internet.
+
+Two guards:
+
+- `MCP_INDEX_DENIED` — 18 tools kept out of the index (pointer primitives,
+  debugging aids, session plumbing, and `browser_run_code_unsafe`, which runs
+  arbitrary JavaScript). They stay connected and callable; they just no longer
+  compete for a slot.
+- `MCP_COMPANIONS` — if any browser tool is retrieved, `browser_navigate` and
+  `browser_snapshot` come with it. The server prefix is taken from the hit
+  itself, so the rule holds under any server id.
+
+After the fix, on the same three queries: `browser_navigate` present 3 times
+out of 3, no denied tool leaking through, and every slot filled with something
+useful (`navigate`, `snapshot`, `find`, `click`, `type`, `press_key`,
+`select_option`). The app now indexes 12 MCP tools instead of 30.
+
+### `src/agent_loop.py`
+
+**Navigating is not reading.** `browser_navigate` returns the page title and a
+snapshot *reference*, never the text. Measured: asked to open a URL and
+summarise it, the agent called `browser_navigate`, saw `exit_code=0`, answered
+"the page loaded successfully" and stopped — having read nothing. A note now
+says so: navigate is never the last step, follow it with `browser_snapshot` (or
+`browser_find`), and `web_fetch` does the whole job in one call when the task is
+only to read.
+
+The note also forbids `browser_snapshot`'s `filename` argument, whose own schema
+reads: "Save snapshot to markdown file *instead of returning it in the
+response*". The model kept inventing one and so received a file path rather than
+the content — 175 characters of reference against 1634 of real content once the
+argument is left out.
+
+The note is injected only when browser tools are in that turn's selection, so it
+costs nothing on unrelated requests.
+
+### `static/js/chat.js`
+
+**Any error containing "tool" silently disabled agent mode.** The test was
+`errText.includes('tool') || errText.includes('auto')`, so any unrelated
+failure — a tool timing out, an MCP server dropping, a message mentioning
+"automatic" — did three things: the real error was replaced with "This model
+doesn't support agent tools", the UI reverted to Chat mode, and that choice was
+**written to `localStorage`**. Every later message in the conversation then ran
+without tools. It presented as "agent mode works in a new chat but not in this
+one".
+
+The test now matches the provider's actual wording (Ollama: `<model> does not
+support tools`), and the original error is preserved.
+
+### `config/searxng/settings.yml`
+
+**The default engine set returned nothing.** SearXNG queries its engines in
+parallel and merges the results, so a grouped query is only as good as its
+worst engine. Measured from this machine, an ordinary search returned **zero
+results**: brave answered "too many requests" while duckduckgo and startpage
+both served a CAPTCHA.
+
+Queried one at a time, bing and duckduckgo return 10 results each; google,
+mojeek, qwant, startpage and brave are dead or blocked. Those five are
+disabled. The remaining pair returns 11-20 results consistently.
+
+These are search engines behind a residential IP, not fixed infrastructure —
+recheck if results thin out.
+
 ### `src/builtin_mcp.py`
 
 **Firefox instead of Chromium** (`--browser firefox`). Playwright defaults to
@@ -145,6 +221,19 @@ On modest hardware these four did more than the choice of model:
 | One model across roles | chat = utility = tasks | A distinct model per role keeps several resident in VRAM at once. |
 | `OLLAMA_CONTEXT_LENGTH` | 8192 | The compact system prompt plus the tool schemas come to ~4,200 tokens: under the 4096 default Ollama truncates, and the model then claims it does not have the tools it was just handed. Size it on the measured need — the surplus is paid for in memory. |
 | `OLLAMA_KEEP_ALIVE` | `-1` | Avoids reloading several GB after five idle minutes. Only combine with a large context while watching VRAM. |
+
+### The "web" toggle trap
+
+The web toggle in the composer does more than allow searching: in agent mode, a
+missing `allow_web_search` strips **both `web_search` and `web_fetch`**
+(`routes/chat_routes.py`). With it off, the agent has no way to read a URL at
+all — including one pasted straight into the message — and says so, which reads
+as a refusal or a hallucination.
+
+This is the intended behaviour: the toggle is the explicit consent to reach the
+network, and leaving it off by default is the right setting for a local
+install. It just has to be known that **"open this page" requires turning it on
+first**. Same for the bash toggle, which alone grants `bash`.
 
 ⚠️ On Windows, restarting Ollama means killing **`llama-server`** as well as
 `ollama`: the models are held by those child processes, and an `ollama*` filter
